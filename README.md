@@ -109,16 +109,6 @@ Detailed performance reports can be found in the `reports/` directory.
 
 ---
 
-## 🤝 Contributing  
-Contributions are welcome! Feel free to submit pull requests or open issues for suggestions.
-
----
-
-## 📜 License  
-This project is licensed under the **MIT License**.
-
----
-
 ## 🔗 Connect with Me  
 💼 [LinkedIn](https://www.linkedin.com/in/chitranshmotwani)  
 📧 Email: [cma115@sfu.ca](mailto:cma115@sfu.ca)  
