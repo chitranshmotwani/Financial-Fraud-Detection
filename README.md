@@ -13,13 +13,14 @@ This project leverages supervised and unsupervised learning techniques to detect
 ✅ Training multiple ML models (Random Forest, XGBoost, Logistic Regression, Isolation Forest)  
 ✅ Model evaluation using AUC-ROC, Precision-Recall, and Confusion Matrix  
 ✅ Explainability tools like SHAP and LIME to interpret model decisions  
-✅ Basic deployment with a CLI tool for fraud detection  
+✅ Interactive dashboard for fraud detection using Streamlit
+✅ Basic deployment with a CLI tool for fraud detection
 
 ---
 
 ## 🛠️ Technologies Used  
 - **Programming Language**: Python  
-- **Libraries**: Pandas, NumPy, Scikit-learn, Matplotlib, Seaborn, XGBoost, SHAP, LIME  
+- **Libraries**: Pandas, NumPy, Scikit-learn, Matplotlib, Seaborn, XGBoost, SHAP, LIME, Streamlit  
 - **Data Sources**:  
   - Kaggle Credit Card Fraud Dataset  
   - PaySim Synthetic Mobile Transactions  
@@ -33,7 +34,8 @@ fraud-detection-ml/
 │── notebooks/            # Jupyter notebooks for EDA and model development  
 │── src/                  # Source code for data processing and model training  
 │   ├── preprocess.py     # Data preprocessing functions  
-│   ├── train.py          # Model training and evaluation   
+│   ├── train.py          # Model training and evaluation
+│   ├── app.py            # Streamlit app for interactive fraud detection   
 │── models/               # Saved trained models  
 │── reports/              # Analysis and findings  
 │── README.md             # Project documentation  
@@ -75,7 +77,13 @@ Train the fraud detection model using different algorithms:
 python src/train.py
 ```
 
-### **3️⃣ Predict Fraud on New Transactions**  
+### **3️⃣ Run the Streamlit App**  
+Launch the Streamlit app for an interactive interface:  
+```sh
+streamlit run src/app.py
+```
+
+### **4️⃣ Predict Fraud on New Transactions**  
 Use the trained model to classify transactions:  
 ```sh
 python src/predict.py --input new_transactions.csv
