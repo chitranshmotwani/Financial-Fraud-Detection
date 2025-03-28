@@ -184,75 +184,104 @@ class FraudDetectionApp:
                     st.dataframe(results)
                     
                     # Model explanation section
-                    self._show_model_explanations(scaled_input)
+                    self._show_model_explanations(scaled_input, input_df)
                 else:
                     st.warning("No predictions could be generated")
                     
             except Exception as e:
                 st.error(f"Transaction analysis failed: {str(e)}")
-                
-    def _show_model_explanations(self, scaled_input: np.ndarray) -> None:
-        """Display model explanation tabs with robust SHAP handling"""
+
+    def _show_model_explanations(self, scaled_input: np.ndarray, input_df: pd.DataFrame) -> None:
+        """Display model explanation tabs with robust error handling"""
         st.subheader("Model Explanations")
         model_choice = st.selectbox(
             "Select model to explain",
-            list(self.models.keys())
+            list(self.models.keys())  # Include all models now
         )
         
         tab1, tab2, tab3 = st.tabs(["SHAP", "LIME", "Feature Importance"])
         
         with tab1:
             try:
-                # Load SHAP values and prepare data
-                shap_values = joblib.load(f'models/{model_choice.lower().replace(" ", "_")}_shap_values.joblib')
+                if model_choice == 'Isolation Forest':
+                    # Special handling for Isolation Forest
+                    model = self.models[model_choice]
+                    explainer = shap.Explainer(
+                        lambda x: -model.decision_function(x),  # Anomaly scores
+                        shap.sample(self.X_test, 100)  # Background data
+                    )
+                    shap_values = explainer(input_df)
+                else:
+                    # Load precomputed SHAP values for other models
+                    shap_values = joblib.load(f'models/{model_choice.lower().replace(" ", "_")}_shap_values.joblib')
                 
-                # Create a DataFrame for the current input
-                input_df = pd.DataFrame([scaled_input[0]], columns=self.feature_names)
-                
-                # Check if we have individual SHAP values for this input
-                if len(shap_values.shape) == 3:  # For multi-class models
-                    shap_values = shap_values[..., 1]  # Get values for positive class
-                
-                # Create force plot for the specific input
-                st.subheader("Input Explanation")
-                fig = shap.force_plot(
-                    shap_values[0],
-                    input_df.iloc[0],
-                    feature_names=self.feature_names,
-                    matplotlib=True
+                # Force plot for the current input
+                st.subheader("Local Explanation")
+                plt.figure()
+                shap.plots.force(
+                    shap_values[0],  # First instance
+                    matplotlib=True,
+                    show=False
                 )
-                st.pyplot(fig, bbox_inches='tight')
+                st.pyplot(plt.gcf())
                 plt.close()
                 
-                # Create summary plot if we have enough data
-                if len(shap_values) > 1:
+                # Only show beeswarm plot for non-Isolation Forest models
+                if model_choice != 'Isolation Forest':
                     st.subheader("Global Feature Importance")
-                    fig, ax = plt.subplots(figsize=(10, 6))
-                    shap.summary_plot(
-                        shap_values, 
-                        features=self.X_test,
-                        feature_names=self.feature_names,
-                        show=False,
-                        plot_size=(10, 6)
+                    plt.figure()
+                    shap.plots.beeswarm(
+                        shap_values,
+                        max_display=15,
+                        show=False
                     )
-                    st.pyplot(fig)
+                    st.pyplot(plt.gcf())
                     plt.close()
-                
+                    
             except Exception as e:
                 st.warning(f"SHAP explanation not available: {str(e)}")
-                st.info("Try retraining models to generate SHAP values")
                 
         with tab2:
             try:
-                st.image(f'models/{model_choice.lower().replace(" ", "_")}_lime_instance_0.png')
-            except Exception:
-                st.warning("LIME explanation not available")
+                if model_choice == 'Isolation Forest':
+                    # Generate LIME explanation on the fly for Isolation Forest
+                    explainer = lime.lime_tabular.LimeTabularExplainer(
+                        training_data=self.X_test.values,
+                        feature_names=self.feature_names,
+                        class_names=['Legitimate', 'Fraud'],
+                        mode='classification',
+                        random_state=42
+                    )
+                    
+                    def predict_fn(x):
+                        preds = self.models[model_choice].predict(x)
+                        return np.vstack([(preds == 1).astype(int), (preds == -1).astype(int)]).T
+                    
+                    exp = explainer.explain_instance(
+                        input_df.values[0], 
+                        predict_fn,
+                        num_features=10
+                    )
+                    
+                    # Save and display the plot
+                    fig = exp.as_pyplot_figure()
+                    st.pyplot(fig)
+                    plt.close()
+                else:
+                    # Show precomputed LIME explanation
+                    st.image(f'models/{model_choice.lower().replace(" ", "_")}_lime_instance_0.png')
+            except Exception as e:
+                st.warning(f"LIME explanation not available: {str(e)}")
                 
         with tab3:
             try:
-                st.image(f'models/{model_choice.lower().replace(" ", "_")}_feature_importance.png')
-            except Exception:
-                st.warning("Feature importance not available")
+                if model_choice == 'Isolation Forest':
+                    # Isolation Forest doesn't have feature importances
+                    st.info("Feature importance not available for Isolation Forest")
+                else:
+                    st.image(f'models/{model_choice.lower().replace(" ", "_")}_feature_importance.png')
+            except Exception as e:
+                st.warning(f"Feature importance not available: {str(e)}")
                 
     def batch_analysis(self) -> None:
         """Process batch transactions with comprehensive validation"""
@@ -264,11 +293,25 @@ class FraudDetectionApp:
         
         if uploaded_file:
             try:
+                # Load the raw data
                 batch_df = pd.read_csv(uploaded_file)
+                
+                # Check for minimum required columns (original features before engineering)
+                required_original_cols = ['Time', 'Amount'] + [f'V{i}' for i in range(1, 29)] + ['Class']
+                missing_original_cols = set(required_original_cols) - set(batch_df.columns)
+                
+                if missing_original_cols:
+                    st.error(f"Missing required original columns: {list(missing_original_cols)}")
+                    return
+                    
+                # Perform the same feature engineering as in preprocessing
+                batch_df = self._engineer_features(batch_df)
+                
+                # Now check if we have all the expected features
                 missing_cols = set(self.feature_names) - set(batch_df.columns)
                 
                 if missing_cols:
-                    st.error(f"Missing required columns: {list(missing_cols)}")
+                    st.error(f"After feature engineering, still missing columns: {list(missing_cols)}")
                     return
                     
                 # Preprocess and predict
@@ -290,34 +333,82 @@ class FraudDetectionApp:
                 
             except Exception as e:
                 st.error(f"Batch processing failed: {str(e)}")
+                st.exception(e)  # This will show the full traceback for debugging
+
+    def _engineer_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Perform the same feature engineering as in preprocessing"""
+        df = df.copy()
+        
+        # Time features
+        if 'Time' in df.columns:
+            df['Time_hour'] = df['Time'] % (24 * 3600) // 3600
+            df['Time_day'] = df['Time'] // (24 * 3600)
+        
+        # Amount features
+        if 'Amount' in df.columns:
+            df['Amount_log'] = np.log1p(df['Amount'])
+        
+        return df
                 
     def _generate_batch_predictions(self, 
-                                  batch_df: pd.DataFrame, 
-                                  batch_scaled: np.ndarray,
-                                  model_name: str) -> pd.DataFrame:
+                                batch_df: pd.DataFrame, 
+                                batch_scaled: np.ndarray,
+                                model_name: str) -> pd.DataFrame:
         """Generate predictions for batch data"""
         model = self.models[model_name]
         
-        if model_name == 'Isolation Forest':
-            preds = model.predict(batch_scaled)
-            scores = -model.decision_function(batch_scaled)
-            batch_df['Prediction'] = np.where(preds == -1, 'Fraud', 'Legitimate')
-            batch_df['Anomaly_Score'] = scores
-        else:
-            probs = model.predict_proba(batch_scaled)[:, 1]
-            batch_df['Prediction'] = np.where(probs > 0.5, 'Fraud', 'Legitimate')
-            batch_df['Fraud_Probability'] = probs
+        try:
+            if model_name == 'Isolation Forest':
+                preds = model.predict(batch_scaled)
+                scores = -model.decision_function(batch_scaled)
+                batch_df['Prediction'] = np.where(preds == -1, 'Fraud', 'Legitimate')
+                batch_df['Anomaly_Score'] = scores
+            else:
+                probs = model.predict_proba(batch_scaled)[:, 1]
+                batch_df['Prediction'] = np.where(probs > 0.5, 'Fraud', 'Legitimate')
+                batch_df['Fraud_Probability'] = probs
+            
+            # Add confidence score
+            batch_df['Confidence'] = batch_df.apply(
+                lambda row: f"{max(row['Fraud_Probability'], 1-row['Fraud_Probability'])*100:.1f}%" 
+                if 'Fraud_Probability' in row else "N/A",
+                axis=1
+            )
+            
+        except Exception as e:
+            st.error(f"Prediction failed: {str(e)}")
+            batch_df['Prediction'] = "Error"
+            batch_df['Error'] = str(e)
             
         return batch_df
         
     def _display_batch_results(self, batch_df: pd.DataFrame) -> None:
         """Display and export batch results"""
         st.subheader("Batch Prediction Results")
-        st.dataframe(batch_df)
         
-        fraud_count = int(sum(batch_df['Prediction'] == 'Fraud'))
-        st.metric("Predicted Fraudulent Transactions", fraud_count)
+        # Show summary stats first
+        if 'Prediction' in batch_df.columns:
+            fraud_count = int(sum(batch_df['Prediction'] == 'Fraud'))
+            total_count = len(batch_df)
+            st.metric("Predicted Fraudulent Transactions", 
+                    f"{fraud_count} ({fraud_count/total_count*100:.1f}%)")
         
+        # Display the dataframe with important columns first
+        display_cols = ['Prediction']
+        if 'Fraud_Probability' in batch_df.columns:
+            display_cols.append('Fraud_Probability')
+        if 'Confidence' in batch_df.columns:
+            display_cols.append('Confidence')
+        if 'Anomaly_Score' in batch_df.columns:
+            display_cols.append('Anomaly_Score')
+        
+        # Add all other columns except prediction-related ones
+        other_cols = [col for col in batch_df.columns if col not in display_cols]
+        display_cols.extend(other_cols)
+        
+        st.dataframe(batch_df[display_cols])
+        
+        # Download button
         csv = batch_df.to_csv(index=False).encode('utf-8')
         st.download_button(
             "Download Predictions",

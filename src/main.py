@@ -74,12 +74,13 @@ def main():
                     y_train
                 )
                 
-            # Evaluate model
+            # Evaluate model with SHAP computation
             metrics = model.evaluate_model(
                 trained_model,
                 X_test,
                 y_test,
-                model_name
+                model_name,
+                compute_shap=True  # Ensure SHAP is computed
             )
             print(f"Evaluation metrics for {model_name}:")
             print(f"ROC-AUC: {metrics['roc_auc']:.4f}")

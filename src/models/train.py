@@ -98,7 +98,8 @@ class FraudDetectionModel:
         model: Any,
         X_test: pd.DataFrame,
         y_test: pd.Series,
-        model_name: str = None
+        model_name: str = None,
+        compute_shap: bool = True
     ) -> Dict[str, float]:
         """
         Evaluate model performance on test set
@@ -108,7 +109,8 @@ class FraudDetectionModel:
             X_test (pd.DataFrame): Test features
             y_test (pd.Series): Test labels
             model_name (str): Name of the model
-            
+            compute_shap (bool): Whether to compute SHAP values
+                
         Returns:
             dict: Dictionary of evaluation metrics
         """
@@ -118,9 +120,8 @@ class FraudDetectionModel:
         # Handle Isolation Forest separately
         if model_name == 'isolation_forest':
             y_pred = model.predict(X_test)
-            # Convert predictions (1 for inliers, -1 for outliers) to 0 and 1
             y_pred = np.where(y_pred == 1, 0, 1)
-            y_scores = -model.decision_function(X_test)  # anomaly scores
+            y_scores = -model.decision_function(X_test)
         else:
             y_pred = model.predict(X_test)
             y_scores = model.predict_proba(X_test)[:, 1]
@@ -141,13 +142,33 @@ class FraudDetectionModel:
             'confusion_matrix': cm.tolist()
         }
         
-        # Plot confusion matrix
+        # Generate and save SHAP values if requested and not Isolation Forest
+        if compute_shap and model_name != 'isolation_forest':
+            try:
+                explainer = shap.TreeExplainer(model)
+                shap_values = explainer.shap_values(X_test)
+                
+                # For binary classification, get values for positive class
+                if isinstance(shap_values, list) and len(shap_values) == 2:
+                    shap_values = shap_values[1]
+                
+                # Create proper Explanation object
+                explanation = shap.Explanation(
+                    values=shap_values,
+                    base_values=explainer.expected_value,
+                    data=X_test.values,
+                    feature_names=X_test.columns.tolist()
+                )
+                
+                # Save the explanation object
+                joblib.dump(explanation, f'models/{model_name}_shap.joblib')
+                
+            except Exception as e:
+                print(f"Could not generate SHAP values: {str(e)}")
+        
+        # Plotting functions
         self.plot_confusion_matrix(cm, model_name)
-        
-        # Plot ROC and PR curves
         self.plot_roc_pr_curves(y_test, y_scores, model_name)
-        
-        # Save model
         self.save_model(model, model_name)
         
         return self.metrics[model_name]
