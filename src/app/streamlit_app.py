@@ -1,16 +1,23 @@
-#src/app/streamlit_app.py
-
 import streamlit as st
 import pandas as pd
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import sys
+import os
+from typing import Dict, Any, Optional
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
 from src.utils.explainability import ModelExplainer
 from src.utils.preprocessing import DataPreprocessor
 import shap
 import lime
 import lime.lime_tabular
+
+# Initialize SHAP JS - this is crucial for visualizations
+shap.initjs()
 
 # Set page config
 st.set_page_config(
@@ -20,102 +27,115 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
-def local_css(file_name):
-    with open(file_name) as f:
-        st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
-
-local_css("style.css")
-
 class FraudDetectionApp:
     def __init__(self):
+        self.models: Dict[str, Any] = {}
+        self.scaler = None
+        self.feature_names = []
+        self.X_test = pd.DataFrame()
+        self.y_test = pd.Series()
+        self.explainer = ModelExplainer()
         self.load_models()
         self.load_data()
-        self.explainer = ModelExplainer()
         
-    def load_models(self):
-        """Load trained models"""
+    def load_models(self) -> None:
+        """Safely load trained models with error handling"""
+        model_files = {
+            'XGBoost': 'xgboost_model.joblib',
+            'Random Forest': 'random_forest_model.joblib',
+            'Logistic Regression': 'logistic_regression_model.joblib',
+            'Isolation Forest': 'isolation_forest_model.joblib'
+        }
+        
+        for model_name, filename in model_files.items():
+            try:
+                self.models[model_name] = joblib.load(f'models/{filename}')
+            except Exception as e:
+                st.error(f"Failed to load {model_name}: {str(e)}")
+        
         try:
-            self.models = {
-                'Random Forest': joblib.load('models/random_forest_model.joblib'),
-                'Logistic Regression': joblib.load('models/logistic_regression_model.joblib'),
-                'XGBoost': joblib.load('models/xgboost_model.joblib'),
-                'Isolation Forest': joblib.load('models/isolation_forest_model.joblib')
-            }
             self.scaler = joblib.load('models/scaler.joblib')
             self.feature_names = joblib.load('data/processed/feature_names.joblib')
-        except FileNotFoundError as e:
-            st.error(f"Model files not found. Please train models first. Error: {e}")
+        except Exception as e:
+            st.error(f"Failed to load preprocessing artifacts: {str(e)}")
             st.stop()
             
-    def load_data(self):
-        """Load sample data"""
+    def load_data(self) -> None:
+        """Load and validate processed data"""
         try:
             _, self.X_test, _, self.y_test = joblib.load('data/processed/processed_data.joblib')
-        except FileNotFoundError:
-            st.error("Processed data not found. Please run preprocessing first.")
+            if len(self.X_test) == 0 or len(self.y_test) == 0:
+                raise ValueError("Loaded empty test data")
+        except Exception as e:
+            st.error(f"Data loading failed: {str(e)}")
             st.stop()
             
-    def show_overview(self):
-        """Show project overview"""
+    def show_overview(self) -> None:
+        """Display project overview and model performance"""
         st.title("Financial Fraud Detection System")
         st.markdown("""
         This application detects fraudulent financial transactions using machine learning.
         It supports both single transaction analysis and batch processing.
         """)
         
-        # Show data summary
+        # Data summary
         st.subheader("Data Summary")
         col1, col2, col3 = st.columns(3)
         col1.metric("Total Transactions", len(self.X_test))
-        col2.metric("Fraudulent Transactions", sum(self.y_test))
-        col3.metric("Fraud Rate", f"{sum(self.y_test)/len(self.y_test)*100:.2f}%")
+        fraud_count = int(sum(self.y_test))  # Ensure integer for display
+        col2.metric("Fraudulent Transactions", fraud_count)
+        col3.metric("Fraud Rate", f"{fraud_count/len(self.y_test)*100:.2f}%")
         
-        # Show model performance
+        # Model performance
         st.subheader("Model Performance")
         try:
             metrics = joblib.load('data/processed/model_metrics.joblib')
-            st.dataframe(metrics.style.highlight_max(axis=0))
-        except FileNotFoundError:
-            st.warning("Model metrics not available. Please train models first.")
             
-    def single_transaction_analysis(self):
-        """Analyze a single transaction"""
-        st.header("Single Transaction Analysis")
+            # Display metrics without confusion matrix
+            st.dataframe(
+                metrics.drop(columns=['confusion_matrix'])
+                .style.highlight_max(axis=0, props='font-weight:bold;background-color:yellow')
+            )
+            
+            # Confusion matrices with heatmaps
+            st.subheader("Confusion Matrices")
+            for model_name in metrics.index:
+                with st.expander(f"{model_name} Details"):
+                    cm = metrics.loc[model_name, 'confusion_matrix']
+                    
+                    # Table view
+                    st.write(pd.DataFrame(
+                        cm,
+                        columns=['Predicted Legitimate', 'Predicted Fraud'],
+                        index=['Actual Legitimate', 'Actual Fraud']
+                    ))
+                    
+                    # Heatmap visualization
+                    fig, ax = plt.subplots(figsize=(6,4))
+                    sns.heatmap(
+                        cm,
+                        annot=True, fmt='d', cmap='Blues',
+                        xticklabels=['Legitimate', 'Fraud'],
+                        yticklabels=['Legitimate', 'Fraud']
+                    )
+                    st.pyplot(fig)
+                    plt.close()
+                    
+        except Exception as e:
+            st.warning(f"Could not load model metrics: {str(e)}")
+            
+    def _get_prediction_results(self, scaled_input: np.ndarray) -> pd.DataFrame:
+        """Generate predictions for all models"""
+        results = []
         
-        # Create form for manual input
-        with st.form("transaction_form"):
-            st.subheader("Enter Transaction Details")
-            
-            # Create input fields for each feature
-            inputs = {}
-            cols = st.columns(3)
-            for i, feature in enumerate(self.feature_names):
-                col = cols[i % 3]
-                inputs[feature] = col.number_input(
-                    feature,
-                    value=float(self.X_test.iloc[0][feature]),
-                    format="%.6f" if "V" in feature else "%.2f"
-                )
-                
-            submitted = st.form_submit_button("Analyze Transaction")
-            
-        if submitted:
-            # Prepare input data
-            input_df = pd.DataFrame([inputs])
-            scaled_input = self.scaler.transform(input_df)
-            
-            # Make predictions with all models
-            st.subheader("Prediction Results")
-            results = []
-            
-            for model_name, model in self.models.items():
+        for model_name, model in self.models.items():
+            try:
                 if model_name == 'Isolation Forest':
                     pred = model.predict(scaled_input)
-                    proba = -model.decision_function(scaled_input)  # anomaly score
+                    proba = float(-model.decision_function(scaled_input)[0])  # Convert to scalar
                     pred_label = "Fraud" if pred[0] == -1 else "Legitimate"
                 else:
-                    proba = model.predict_proba(scaled_input)[0][1]
+                    proba = float(model.predict_proba(scaled_input)[0][1])  # Convert to scalar
                     pred_label = "Fraud" if proba > 0.5 else "Legitimate"
                     
                 results.append({
@@ -124,172 +144,267 @@ class FraudDetectionApp:
                     "Probability/Score": f"{proba:.4f}",
                     "Confidence": f"{max(proba, 1-proba)*100:.1f}%"
                 })
+            except Exception as e:
+                st.error(f"Prediction failed for {model_name}: {str(e)}")
+                continue
                 
-            # Show results table
-            st.table(pd.DataFrame(results))
+        return pd.DataFrame(results)
             
-            # Show explainability
-            st.subheader("Model Explanations")
-            model_choice = st.selectbox(
-                "Select model to explain",
-                list(self.models.keys())
-            )
-            
-            tab1, tab2, tab3 = st.tabs(["SHAP", "LIME", "Feature Importance"])
-            
-            with tab1:
-                try:
-                    shap_values = joblib.load(f'models/{model_choice.lower().replace(" ", "_")}_shap_values.joblib')
-                    st_shap(shap.plots.force(shap_values[0]))
-                except FileNotFoundError:
-                    st.warning("SHAP values not available for this model.")
-                    
-            with tab2:
-                try:
-                    st.image(f'models/{model_choice.lower().replace(" ", "_")}_lime_instance_0.png')
-                except FileNotFoundError:
-                    st.warning("LIME explanation not available for this model.")
-                    
-            with tab3:
-                try:
-                    st.image(f'models/{model_choice.lower().replace(" ", "_")}_feature_importance.png')
-                except FileNotFoundError:
-                    st.warning("Feature importance not available for this model.")
-                    
-    def batch_analysis(self):
-        """Analyze a batch of transactions"""
-        st.header("Batch Analysis")
+    def single_transaction_analysis(self) -> None:
+        """Analyze a single transaction with robust error handling"""
+        st.header("Single Transaction Analysis")
         
+        with st.form("transaction_form"):
+            st.subheader("Enter Transaction Details")
+            inputs = {}
+            cols = st.columns(3)
+            
+            # Create input fields using the first test sample as default
+            sample_data = self.X_test.iloc[0] if len(self.X_test) > 0 else {}
+            for i, feature in enumerate(self.feature_names):
+                default_val = float(sample_data.get(feature, 0.0))
+                inputs[feature] = cols[i % 3].number_input(
+                    feature,
+                    value=default_val,
+                    format="%.6f" if "V" in feature else "%.2f"
+                )
+                
+            submitted = st.form_submit_button("Analyze Transaction")
+            
+        if submitted:
+            try:
+                # Prepare and scale input
+                input_df = pd.DataFrame([inputs])
+                scaled_input = self.scaler.transform(input_df)
+                
+                # Get and display predictions
+                st.subheader("Prediction Results")
+                results = self._get_prediction_results(scaled_input)
+                if not results.empty:
+                    st.dataframe(results)
+                    
+                    # Model explanation section
+                    self._show_model_explanations(scaled_input)
+                else:
+                    st.warning("No predictions could be generated")
+                    
+            except Exception as e:
+                st.error(f"Transaction analysis failed: {str(e)}")
+                
+    def _show_model_explanations(self, scaled_input: np.ndarray) -> None:
+        """Display model explanation tabs with robust SHAP handling"""
+        st.subheader("Model Explanations")
+        model_choice = st.selectbox(
+            "Select model to explain",
+            list(self.models.keys())
+        )
+        
+        tab1, tab2, tab3 = st.tabs(["SHAP", "LIME", "Feature Importance"])
+        
+        with tab1:
+            try:
+                # Load SHAP values and prepare data
+                shap_values = joblib.load(f'models/{model_choice.lower().replace(" ", "_")}_shap_values.joblib')
+                
+                # Create a DataFrame for the current input
+                input_df = pd.DataFrame([scaled_input[0]], columns=self.feature_names)
+                
+                # Check if we have individual SHAP values for this input
+                if len(shap_values.shape) == 3:  # For multi-class models
+                    shap_values = shap_values[..., 1]  # Get values for positive class
+                
+                # Create force plot for the specific input
+                st.subheader("Input Explanation")
+                fig = shap.force_plot(
+                    shap_values[0],
+                    input_df.iloc[0],
+                    feature_names=self.feature_names,
+                    matplotlib=True
+                )
+                st.pyplot(fig, bbox_inches='tight')
+                plt.close()
+                
+                # Create summary plot if we have enough data
+                if len(shap_values) > 1:
+                    st.subheader("Global Feature Importance")
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    shap.summary_plot(
+                        shap_values, 
+                        features=self.X_test,
+                        feature_names=self.feature_names,
+                        show=False,
+                        plot_size=(10, 6)
+                    )
+                    st.pyplot(fig)
+                    plt.close()
+                
+            except Exception as e:
+                st.warning(f"SHAP explanation not available: {str(e)}")
+                st.info("Try retraining models to generate SHAP values")
+                
+        with tab2:
+            try:
+                st.image(f'models/{model_choice.lower().replace(" ", "_")}_lime_instance_0.png')
+            except Exception:
+                st.warning("LIME explanation not available")
+                
+        with tab3:
+            try:
+                st.image(f'models/{model_choice.lower().replace(" ", "_")}_feature_importance.png')
+            except Exception:
+                st.warning("Feature importance not available")
+                
+    def batch_analysis(self) -> None:
+        """Process batch transactions with comprehensive validation"""
+        st.header("Batch Analysis")
         uploaded_file = st.file_uploader(
             "Upload CSV file with transactions",
             type=["csv"]
         )
         
-        if uploaded_file is not None:
+        if uploaded_file:
             try:
-                # Read uploaded file
                 batch_df = pd.read_csv(uploaded_file)
-                
-                # Check if required columns are present
                 missing_cols = set(self.feature_names) - set(batch_df.columns)
+                
                 if missing_cols:
-                    st.error(f"Missing columns in uploaded file: {missing_cols}")
+                    st.error(f"Missing required columns: {list(missing_cols)}")
                     return
                     
-                # Preprocess and scale
+                # Preprocess and predict
                 preprocessor = DataPreprocessor()
                 batch_processed = preprocessor.basic_preprocessing(batch_df)
                 batch_scaled = self.scaler.transform(batch_processed[self.feature_names])
                 
-                # Select model
                 model_choice = st.selectbox(
-                    "Select model for prediction",
+                    "Select prediction model",
                     list(self.models.keys())
                 )
-                model = self.models[model_choice]
                 
-                # Make predictions
-                if model_choice == 'Isolation Forest':
-                    predictions = model.predict(batch_scaled)
-                    scores = -model.decision_function(batch_scaled)
-                    batch_df['Prediction'] = np.where(predictions == -1, 'Fraud', 'Legitimate')
-                    batch_df['Anomaly_Score'] = scores
-                else:
-                    probabilities = model.predict_proba(batch_scaled)[:, 1]
-                    batch_df['Prediction'] = np.where(probabilities > 0.5, 'Fraud', 'Legitimate')
-                    batch_df['Fraud_Probability'] = probabilities
-                    
-                # Show results
-                st.subheader("Batch Prediction Results")
-                st.dataframe(batch_df)
-                
-                # Show summary stats
-                fraud_count = sum(batch_df['Prediction'] == 'Fraud')
-                st.metric("Predicted Fraudulent Transactions", fraud_count)
-                
-                # Download results
-                csv = batch_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    "Download Predictions",
-                    csv,
-                    "fraud_predictions.csv",
-                    "text/csv",
-                    key='download-csv'
+                batch_df = self._generate_batch_predictions(
+                    batch_df, batch_scaled, model_choice
                 )
                 
-            except Exception as e:
-                st.error(f"Error processing file: {e}")
+                # Display and export results
+                self._display_batch_results(batch_df)
                 
-    def data_exploration(self):
-        """Show data exploration visualizations"""
+            except Exception as e:
+                st.error(f"Batch processing failed: {str(e)}")
+                
+    def _generate_batch_predictions(self, 
+                                  batch_df: pd.DataFrame, 
+                                  batch_scaled: np.ndarray,
+                                  model_name: str) -> pd.DataFrame:
+        """Generate predictions for batch data"""
+        model = self.models[model_name]
+        
+        if model_name == 'Isolation Forest':
+            preds = model.predict(batch_scaled)
+            scores = -model.decision_function(batch_scaled)
+            batch_df['Prediction'] = np.where(preds == -1, 'Fraud', 'Legitimate')
+            batch_df['Anomaly_Score'] = scores
+        else:
+            probs = model.predict_proba(batch_scaled)[:, 1]
+            batch_df['Prediction'] = np.where(probs > 0.5, 'Fraud', 'Legitimate')
+            batch_df['Fraud_Probability'] = probs
+            
+        return batch_df
+        
+    def _display_batch_results(self, batch_df: pd.DataFrame) -> None:
+        """Display and export batch results"""
+        st.subheader("Batch Prediction Results")
+        st.dataframe(batch_df)
+        
+        fraud_count = int(sum(batch_df['Prediction'] == 'Fraud'))
+        st.metric("Predicted Fraudulent Transactions", fraud_count)
+        
+        csv = batch_df.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            "Download Predictions",
+            csv,
+            "fraud_predictions.csv",
+            "text/csv",
+            key='download-csv'
+        )
+        
+    def data_exploration(self) -> None:
+        """Interactive data visualization"""
         st.header("Data Exploration")
         
-        # Load full processed data
         try:
             X_train, X_test, y_train, y_test = joblib.load('data/processed/processed_data.joblib')
             X_test['Class'] = y_test
-        except FileNotFoundError:
-            st.error("Processed data not found.")
-            return
             
-        # Show feature distributions
+            # Feature distribution analysis
+            self._show_feature_distributions(X_test)
+            
+            # Correlation analysis
+            self._show_correlation_heatmap(X_test)
+            
+        except Exception as e:
+            st.error(f"Data exploration failed: {str(e)}")
+            
+    def _show_feature_distributions(self, data: pd.DataFrame) -> None:
+        """Show feature distributions by class"""
         st.subheader("Feature Distributions")
-        feature_choice = st.selectbox(
-            "Select feature to visualize",
-            self.feature_names
-        )
+        feature = st.selectbox("Select feature", self.feature_names)
         
         fig, ax = plt.subplots(1, 2, figsize=(12, 5))
-        sns.histplot(
-            X_test[feature_choice],
-            kde=True,
-            ax=ax[0]
-        )
-        ax[0].set_title(f"Distribution of {feature_choice}")
+        sns.histplot(data[feature], kde=True, ax=ax[0])
+        ax[0].set_title(f"Distribution of {feature}")
         
-        sns.boxplot(
-            x='Class',
-            y=feature_choice,
-            data=X_test,
-            ax=ax[1]
-        )
-        ax[1].set_title(f"{feature_choice} by Class")
+        sns.boxplot(x='Class', y=feature, data=data, ax=ax[1])
+        ax[1].set_title(f"{feature} by Class")
         st.pyplot(fig)
+        plt.close()
         
-        # Show correlation heatmap
+    def _show_correlation_heatmap(self, data: pd.DataFrame) -> None:
+        """Show feature correlation matrix"""
         st.subheader("Correlation Heatmap")
-        numeric_cols = X_test.select_dtypes(include=np.number).columns
-        corr = X_test[numeric_cols].corr()
+        numeric_cols = data.select_dtypes(include=np.number).columns
+        corr = data[numeric_cols].corr()
         
         plt.figure(figsize=(12, 10))
         sns.heatmap(corr, annot=True, fmt=".2f", cmap='coolwarm', center=0)
         st.pyplot(plt)
-        
-def st_shap(plot, height=None):
-    """Display SHAP plot in Streamlit"""
-    import streamlit.components.v1 as components
-    shap_html = f"<head>{shap.getjs()}</head><body>{plot.html()}</body>"
-    components.html(shap_html, height=height)
+        plt.close()
 
-def main():
+def st_shap(plot, height: Optional[int] = None) -> None:
+    """Render SHAP plots in Streamlit"""
+    import streamlit.components.v1 as components
+    # Get both JS and HTML parts
+    shap_html = f"""
+    <head>
+        {shap.getjs()}
+    </head>
+    <body>
+        {plot.html()}
+    </body>
+    """
+    components.html(shap_html, height=height, scrolling=True)
+
+def main() -> None:
     app = FraudDetectionApp()
     
-    # Sidebar navigation
+    # Navigation
     st.sidebar.title("Navigation")
     app_mode = st.sidebar.radio(
         "Go to",
         ["Overview", "Single Transaction", "Batch Analysis", "Data Exploration"]
     )
     
-    # Show selected page
-    if app_mode == "Overview":
-        app.show_overview()
-    elif app_mode == "Single Transaction":
-        app.single_transaction_analysis()
-    elif app_mode == "Batch Analysis":
-        app.batch_analysis()
-    elif app_mode == "Data Exploration":
-        app.data_exploration()
-        
+    # Page routing
+    page_map = {
+        "Overview": app.show_overview,
+        "Single Transaction": app.single_transaction_analysis,
+        "Batch Analysis": app.batch_analysis,
+        "Data Exploration": app.data_exploration
+    }
+    
+    try:
+        page_map[app_mode]()
+    except Exception as e:
+        st.error(f"Application error: {str(e)}")
+
 if __name__ == "__main__":
     main()

@@ -177,3 +177,13 @@ class ModelExplainer:
             plt.tight_layout()
             plt.savefig(f'models/{model_name}_coefficients.png')
             plt.close()
+
+    def detailed_shap_analysis(self, model, X_train, X_test, model_name):
+        explainer = shap.TreeExplainer(model)
+        shap_values = explainer.shap_values(X_test)
+        
+        # Summary plot
+        shap.summary_plot(shap_values, X_test, show=False)
+        plt.title(f'Detailed SHAP Summary - {model_name}')
+        plt.savefig(f'models/{model_name}_detailed_shap.png')
+        plt.close()

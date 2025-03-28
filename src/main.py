@@ -2,10 +2,10 @@
 
 import argparse
 import joblib
-from src.utils.data_loader import DataLoader
-from src.utils.preprocessing import DataPreprocessor
-from src.models.train import FraudDetectionModel
-from src.utils.explainability import ModelExplainer
+from utils.data_loader import DataLoader
+from utils.preprocessing import DataPreprocessor
+from models.train import FraudDetectionModel
+from utils.explainability import ModelExplainer
 
 def main():
     # Parse command line arguments

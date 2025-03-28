@@ -138,7 +138,7 @@ class FraudDetectionModel:
             'f1': report['weighted avg']['f1-score'],
             'roc_auc': roc_auc,
             'pr_auc': pr_auc,
-            'confusion_matrix': cm
+            'confusion_matrix': cm.tolist()
         }
         
         # Plot confusion matrix
