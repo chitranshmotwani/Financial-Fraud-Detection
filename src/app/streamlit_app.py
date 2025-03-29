@@ -154,6 +154,10 @@ class FraudDetectionApp:
         """Analyze a single transaction with robust error handling"""
         st.header("Single Transaction Analysis")
         
+        # Initialize session state for form submission if it doesn't exist
+        if 'form_submitted' not in st.session_state:
+            st.session_state.form_submitted = False
+        
         with st.form("transaction_form"):
             st.subheader("Enter Transaction Details")
             inputs = {}
@@ -171,10 +175,18 @@ class FraudDetectionApp:
                 
             submitted = st.form_submit_button("Analyze Transaction")
             
-        if submitted:
+            if submitted:
+                st.session_state.form_submitted = True
+                st.session_state.current_inputs = inputs
+        
+        # Only show results if the form was submitted (either now or previously)
+        if st.session_state.get('form_submitted', False):
             try:
+                # Use either the new inputs or the stored ones
+                current_inputs = st.session_state.current_inputs if 'current_inputs' in st.session_state else inputs
+                
                 # Prepare and scale input
-                input_df = pd.DataFrame([inputs])
+                input_df = pd.DataFrame([current_inputs])
                 scaled_input = self.scaler.transform(input_df)
                 
                 # Get and display predictions
@@ -182,6 +194,10 @@ class FraudDetectionApp:
                 results = self._get_prediction_results(scaled_input)
                 if not results.empty:
                     st.dataframe(results)
+                    
+                    # Store the scaled input in session state
+                    st.session_state.scaled_input = scaled_input
+                    st.session_state.input_df = input_df
                     
                     # Model explanation section
                     self._show_model_explanations(scaled_input, input_df)
@@ -194,10 +210,21 @@ class FraudDetectionApp:
     def _show_model_explanations(self, scaled_input: np.ndarray, input_df: pd.DataFrame) -> None:
         """Display model explanation tabs with robust error handling"""
         st.subheader("Model Explanations")
+        
+        # Get the selected model from session state if it exists, otherwise default to first model
+        if 'selected_model' not in st.session_state:
+            st.session_state.selected_model = list(self.models.keys())[0]
+        
+        # Update the selected model based on user input
         model_choice = st.selectbox(
             "Select model to explain",
-            list(self.models.keys())  # Include all models now
+            list(self.models.keys()),
+            key='model_selector',
+            index=list(self.models.keys()).index(st.session_state.selected_model)
         )
+        
+        # Update session state with the new selection
+        st.session_state.selected_model = model_choice
         
         tab1, tab2, tab3 = st.tabs(["SHAP", "LIME", "Feature Importance"])
         
