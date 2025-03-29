@@ -242,23 +242,39 @@ class FraudDetectionApp:
                         shap.sample(self.X_test, 100)  # Background data
                     )
                     shap_values = explainer(input_df)
+                    
+                    # Force plot for the current input
+                    st.subheader("Local Explanation")
+                    plt.figure()
+                    shap.plots.force(
+                        shap_values[0],  # First instance
+                        matplotlib=True,
+                        show=False
+                    )
+                    st.pyplot(plt.gcf())
+                    plt.close()
+                    
+                elif model_choice == 'Random Forest':
+                    # Special clean handling for Random Forest
+                    st.info("""
+                    **Random Forest Note**: SHAP explanations are not currently available for this model.
+                    Please use the LIME or Feature Importance tabs for model explanations.
+                    """)
+                    
                 else:
-                    # Load precomputed SHAP values for other models
+                    # Original handling for other models
                     shap_values = joblib.load(f'models/{model_choice.lower().replace(" ", "_")}_shap_values.joblib')
-                
-                # Force plot for the current input
-                st.subheader("Local Explanation")
-                plt.figure()
-                shap.plots.force(
-                    shap_values[0],  # First instance
-                    matplotlib=True,
-                    show=False
-                )
-                st.pyplot(plt.gcf())
-                plt.close()
-                
-                # Only show beeswarm plot for non-Isolation Forest models
-                if model_choice != 'Isolation Forest':
+                    st.subheader("Local Explanation")
+                    plt.figure()
+                    shap.plots.force(
+                        shap_values[0],  # First instance
+                        matplotlib=True,
+                        show=False
+                    )
+                    st.pyplot(plt.gcf())
+                    plt.close()
+                    
+                    # Show beeswarm plot for feature importance
                     st.subheader("Global Feature Importance")
                     plt.figure()
                     shap.plots.beeswarm(
@@ -272,6 +288,7 @@ class FraudDetectionApp:
             except Exception as e:
                 st.warning(f"SHAP explanation not available: {str(e)}")
                 
+        # Rest of the method remains exactly the same...
         with tab2:
             try:
                 if model_choice == 'Isolation Forest':

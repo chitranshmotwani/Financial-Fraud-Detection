@@ -166,16 +166,17 @@ class ModelExplainer:
             plt.close()
             
         elif hasattr(model, 'coef_'):
-            # For linear models
             coef = model.coef_[0]
-            indices = np.argsort(np.abs(coef))[::-1]
+            indices = np.argsort(np.abs(coef))[::-1]  # Sort by absolute value
             
             plt.figure(figsize=(10, 6))
             plt.title(f'Feature Coefficients - {model_name}')
-            plt.bar(range(len(coef)), coef[indices], align='center')
+            colors = ['red' if x < 0 else 'green' for x in coef[indices]]
+            plt.bar(range(len(coef)), coef[indices], color=colors, align='center')
             plt.xticks(range(len(coef)), [feature_names[i] for i in indices], rotation=90)
+            plt.axhline(0, color='black', linestyle='--')  # Add zero line
             plt.tight_layout()
-            plt.savefig(f'models/{model_name}_coefficients.png')
+            plt.savefig(f'models/{model_name}_feature_importance.png')
             plt.close()
 
     def detailed_shap_analysis(self, model, X_train, X_test, model_name):
