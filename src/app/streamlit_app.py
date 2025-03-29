@@ -154,36 +154,55 @@ class FraudDetectionApp:
         """Analyze a single transaction with robust error handling"""
         st.header("Single Transaction Analysis")
         
-        # Initialize session state for form submission if it doesn't exist
+        # Initialize session state variables
         if 'form_submitted' not in st.session_state:
             st.session_state.form_submitted = False
+        if 'current_transaction' not in st.session_state:
+            self._get_new_random_transaction()
+        
+        # Check if we need to get a new random transaction
+        if 'new_random_requested' in st.session_state and st.session_state.new_random_requested:
+            self._get_new_random_transaction()
+            st.session_state.new_random_requested = False
         
         with st.form("transaction_form"):
             st.subheader("Enter Transaction Details")
+            
+            # Show the class of the current transaction
+            if st.session_state.current_transaction_class is not None:
+                class_label = "Fraud" if st.session_state.current_transaction_class == 1 else "Legitimate"
+                st.markdown(f"**Currently showing a {class_label} transaction**")
+            
             inputs = {}
             cols = st.columns(3)
             
-            # Create input fields using the first test sample as default
-            sample_data = self.X_test.iloc[0] if len(self.X_test) > 0 else {}
+            # Create input fields using the current transaction as default
             for i, feature in enumerate(self.feature_names):
-                default_val = float(sample_data.get(feature, 0.0))
+                default_val = float(st.session_state.current_transaction.get(feature, 0.0))
                 inputs[feature] = cols[i % 3].number_input(
                     feature,
                     value=default_val,
                     format="%.6f" if "V" in feature else "%.2f"
                 )
                 
-            submitted = st.form_submit_button("Analyze Transaction")
+            # Form buttons
+            col1, col2, col3 = st.columns(3)
+            submitted = col1.form_submit_button("Analyze Transaction")
+            new_random = col3.form_submit_button("Get New Random Transaction")
             
             if submitted:
                 st.session_state.form_submitted = True
                 st.session_state.current_inputs = inputs
+            
+            if new_random:
+                st.session_state.new_random_requested = True
+                st.rerun()
         
         # Only show results if the form was submitted (either now or previously)
         if st.session_state.get('form_submitted', False):
             try:
-                # Use either the new inputs or the stored ones
-                current_inputs = st.session_state.current_inputs if 'current_inputs' in st.session_state else inputs
+                # Use the stored inputs
+                current_inputs = st.session_state.current_inputs
                 
                 # Prepare and scale input
                 input_df = pd.DataFrame([current_inputs])
@@ -206,6 +225,15 @@ class FraudDetectionApp:
                     
             except Exception as e:
                 st.error(f"Transaction analysis failed: {str(e)}")
+
+    def _get_new_random_transaction(self) -> None:
+        """Select a new random transaction and update session state"""
+        random_idx = np.random.choice(self.X_test.index)
+        st.session_state.current_transaction = self.X_test.loc[random_idx].to_dict()
+        st.session_state.current_transaction_class = self.y_test.loc[random_idx]
+        st.session_state.form_submitted = False
+        if 'current_inputs' in st.session_state:
+            del st.session_state.current_inputs
 
     def _show_model_explanations(self, scaled_input: np.ndarray, input_df: pd.DataFrame) -> None:
         """Display model explanation tabs with robust error handling"""
