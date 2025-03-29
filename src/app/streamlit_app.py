@@ -168,11 +168,6 @@ class FraudDetectionApp:
         with st.form("transaction_form"):
             st.subheader("Enter Transaction Details")
             
-            # Show the class of the current transaction
-            if st.session_state.current_transaction_class is not None:
-                class_label = "Fraud" if st.session_state.current_transaction_class == 1 else "Legitimate"
-                st.markdown(f"**Currently showing a {class_label} transaction**")
-            
             inputs = {}
             cols = st.columns(3)
             
