@@ -231,6 +231,10 @@ class FraudDetectionApp:
         with tab1:
             try:
                 if model_choice == 'Isolation Forest':
+                    st.info("""
+                    **Isolation Forest Note**: Global feature importance isn't available for unsupervised models. 
+                    Below shows how each feature contributed to this specific anomaly score.
+                    """)
                     # Special handling for Isolation Forest
                     model = self.models[model_choice]
                     explainer = shap.Explainer(
