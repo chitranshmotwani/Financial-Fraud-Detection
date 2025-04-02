@@ -230,8 +230,6 @@ class FraudDetectionApp:
         if 'current_inputs' in st.session_state:
             del st.session_state.current_inputs
 
-# Updated streamlit_app.py with dynamic LIME explanations
-
     def _show_model_explanations(self, scaled_input: np.ndarray, input_df: pd.DataFrame) -> None:
         """Display model explanation tabs with robust error handling"""
         st.subheader("Model Explanations")
@@ -255,63 +253,157 @@ class FraudDetectionApp:
         
         with tab1:
             try:
-                if model_choice == 'Isolation Forest':
+                # Initialize SHAP for the current model
+                model = self.models[model_choice]
+
+                if model_choice == 'XGBoost':
+                    # Special handling for XGBoost
+                    explainer = shap.TreeExplainer(model)
+                    shap_values = explainer.shap_values(input_df)
+                    
+                    # XGBoost returns a different format - we need to handle the array properly
+                    if isinstance(shap_values, list):
+                        shap_values = shap_values[1]  # Take the fraud class values
+                    
+                    st.subheader("Local Explanation")
+                    plt.figure()
+                    shap.force_plot(
+                        explainer.expected_value[1] if isinstance(explainer.expected_value, np.ndarray) else explainer.expected_value,
+                        shap_values[0],
+                        input_df.iloc[0],
+                        feature_names=self.feature_names,
+                        matplotlib=True,
+                        show=False
+                    )
+                    st.pyplot(plt.gcf(), bbox_inches='tight')
+                    plt.close()
+                    
+                    st.subheader("Global Feature Importance")
+                    plt.figure()
+                    shap.summary_plot(
+                        shap_values,
+                        input_df,
+                        feature_names=self.feature_names,
+                        show=False
+                    )
+                    st.pyplot(plt.gcf(), bbox_inches='tight')
+                    plt.close()
+                
+                elif model_choice == 'Isolation Forest':
                     st.info("""
                     **Isolation Forest Note**: Global feature importance isn't available for unsupervised models. 
                     Below shows how each feature contributed to this specific anomaly score.
                     """)
-                    # Special handling for Isolation Forest
-                    model = self.models[model_choice]
-                    explainer = shap.Explainer(
-                        lambda x: -model.decision_function(x),  # Anomaly scores
-                        shap.sample(self.X_test, 100)  # Background data
-                    )
-                    shap_values = explainer(input_df)
                     
-                    # Force plot for the current input
+                    # Create explainer for Isolation Forest
+                    def predict_fn(x):
+                        return -model.decision_function(x)
+                    
+                    explainer = shap.KernelExplainer(
+                        predict_fn,
+                        shap.sample(self.X_test, 100)
+                    )
+                    
+                    # Calculate SHAP values
+                    shap_values = explainer.shap_values(input_df)
+                    
+                    # Force plot
                     st.subheader("Local Explanation")
                     plt.figure()
-                    shap.plots.force(
-                        shap_values[0],  # First instance
+                    shap.force_plot(
+                        explainer.expected_value,
+                        shap_values[0],
+                        input_df.iloc[0],
                         matplotlib=True,
                         show=False
                     )
-                    st.pyplot(plt.gcf())
+                    st.pyplot(plt.gcf(), bbox_inches='tight')
                     plt.close()
                     
                 elif model_choice == 'Random Forest':
-                    # Special clean handling for Random Forest
-                    st.info("""
-                    **Random Forest Note**: SHAP explanations are not currently available for this model.
-                    Please use the LIME or Feature Importance tabs for model explanations.
-                    """)
+                    try:
+                        model = self.models[model_choice]
+                        
+                        # Try the standard SHAP approach first
+                        try:
+                            explainer = shap.TreeExplainer(model)
+                            shap_values = explainer.shap_values(input_df)
+                            
+                            # For binary classification, get values for positive class (fraud)
+                            if isinstance(shap_values, list):
+                                shap_values = shap_values[1]  # Index 1 for fraud class
+                                expected_value = explainer.expected_value[1]
+                            else:
+                                expected_value = explainer.expected_value
+                            
+                            # Create simple bar chart of SHAP values
+                            st.subheader("Feature Contributions")
+                            importance_df = pd.DataFrame({
+                                'Feature': self.feature_names,
+                                'SHAP Value': shap_values[0]  # First (only) prediction
+                            }).sort_values('SHAP Value', key=abs, ascending=False)
+                            
+                            # Plot top contributing features
+                            fig, ax = plt.subplots(figsize=(10, 6))
+                            colors = ['red' if x < 0 else 'green' for x in importance_df['SHAP Value'].head(10)]
+                            ax.barh(importance_df['Feature'].head(10)[::-1], 
+                                    importance_df['SHAP Value'].head(10)[::-1],
+                                    color=colors[::-1])
+                            ax.set_title('Top Feature Contributions (SHAP Values)')
+                            ax.set_xlabel('Impact on Fraud Probability')
+                            ax.axvline(0, color='black', linestyle='--')
+                            st.pyplot(fig)
+                            plt.close()
+                            
+                        except Exception as e:
+                            # Fallback to feature importances if SHAP fails
+                            st.info("""
+                                **SHAP Explanation Note**: 
+                                SHAP explanations are currently not available for Random Forest models 
+                                due to technical limitations in the visualization library. 
+                                Please use the LIME or Feature Importance tabs for model explanations.
+                                """)
                     
-                else:
-                    # Original handling for other models
-                    shap_values = joblib.load(f'models/{model_choice.lower().replace(" ", "_")}_shap_values.joblib')
+                    except Exception as e:
+                        st.error(f"SHAP explanation failed: {str(e)}")
+                        st.info("Please try the LIME explanations instead.")
+                    
+                elif model_choice == 'Logistic Regression':
+                    # Use LinearExplainer for linear models
+                    explainer = shap.LinearExplainer(model, self.X_test)
+                    shap_values = explainer.shap_values(input_df)
+                    
+                    # Force plot
                     st.subheader("Local Explanation")
                     plt.figure()
-                    shap.plots.force(
-                        shap_values[0],  # First instance
+                    shap.force_plot(
+                        explainer.expected_value,
+                        shap_values[0],
+                        input_df.iloc[0],
+                        feature_names=self.feature_names,
                         matplotlib=True,
                         show=False
                     )
-                    st.pyplot(plt.gcf())
+                    st.pyplot(plt.gcf(), bbox_inches='tight')
                     plt.close()
                     
-                    # Show beeswarm plot for feature importance
+                    # Summary plot
                     st.subheader("Global Feature Importance")
                     plt.figure()
-                    shap.plots.beeswarm(
+                    shap.summary_plot(
                         shap_values,
-                        max_display=15,
+                        input_df,
+                        feature_names=self.feature_names,
+                        plot_type="bar",
                         show=False
                     )
-                    st.pyplot(plt.gcf())
+                    st.pyplot(plt.gcf(), bbox_inches='tight')
                     plt.close()
                     
             except Exception as e:
-                st.warning(f"SHAP explanation not available: {str(e)}")
+                st.warning(f"SHAP explanation failed: {str(e)}")
+                st.write("Using alternative SHAP visualization method...")
+                self._show_alternative_shap(model_choice, input_df)
                 
         with tab2:
             try:
@@ -357,6 +449,41 @@ class FraudDetectionApp:
                     st.image(f'models/{model_choice.lower().replace(" ", "_")}_feature_importance.png')
             except Exception as e:
                 st.warning(f"Feature importance not available: {str(e)}")
+
+    def _show_alternative_shap(self, model_choice: str, input_df: pd.DataFrame) -> None:
+        """Simpler fallback visualization when SHAP fails"""
+        try:
+            model = self.models[model_choice]
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(input_df)
+            
+            # Handle binary classification case
+            if isinstance(shap_values, list):
+                shap_values = shap_values[1]  # Use fraud class values
+            
+            # Create simple bar chart of absolute SHAP values
+            st.subheader("Feature Importance")
+            importance_df = pd.DataFrame({
+                'Feature': self.feature_names,
+                'Importance': np.abs(shap_values).mean(0)
+            }).sort_values('Importance', ascending=False)
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.barh(importance_df['Feature'].head(15), 
+                    importance_df['Importance'].head(15),
+                    color='skyblue')
+            ax.set_title('Feature Importance (Absolute SHAP Values)')
+            ax.set_xlabel('Mean Absolute SHAP Value')
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close()
+            
+        except Exception as e:
+            st.error(f"SHAP visualization failed: {str(e)}")
+            st.info("""
+            SHAP explanations could not be generated for this model/transaction.
+            Please try the LIME explanations instead.
+            """)
                 
     def batch_analysis(self) -> None:
         """Process batch transactions with comprehensive validation"""
