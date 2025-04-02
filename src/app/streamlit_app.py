@@ -230,6 +230,8 @@ class FraudDetectionApp:
         if 'current_inputs' in st.session_state:
             del st.session_state.current_inputs
 
+# Updated streamlit_app.py with dynamic LIME explanations
+
     def _show_model_explanations(self, scaled_input: np.ndarray, input_df: pd.DataFrame) -> None:
         """Display model explanation tabs with robust error handling"""
         st.subheader("Model Explanations")
@@ -311,38 +313,40 @@ class FraudDetectionApp:
             except Exception as e:
                 st.warning(f"SHAP explanation not available: {str(e)}")
                 
-        # Rest of the method remains exactly the same...
         with tab2:
             try:
+                # Always generate LIME explanation on the fly for the current transaction
+                explainer = lime.lime_tabular.LimeTabularExplainer(
+                    training_data=self.X_test.values,
+                    feature_names=self.feature_names,
+                    class_names=['Legitimate', 'Fraud'],
+                    mode='classification',
+                    random_state=42
+                )
+                
                 if model_choice == 'Isolation Forest':
-                    # Generate LIME explanation on the fly for Isolation Forest
-                    explainer = lime.lime_tabular.LimeTabularExplainer(
-                        training_data=self.X_test.values,
-                        feature_names=self.feature_names,
-                        class_names=['Legitimate', 'Fraud'],
-                        mode='classification',
-                        random_state=42
-                    )
-                    
                     def predict_fn(x):
                         preds = self.models[model_choice].predict(x)
                         return np.vstack([(preds == 1).astype(int), (preds == -1).astype(int)]).T
-                    
-                    exp = explainer.explain_instance(
-                        input_df.values[0], 
-                        predict_fn,
-                        num_features=10
-                    )
-                    
-                    # Save and display the plot
-                    fig = exp.as_pyplot_figure()
-                    st.pyplot(fig)
-                    plt.close()
                 else:
-                    # Show precomputed LIME explanation
-                    st.image(f'models/{model_choice.lower().replace(" ", "_")}_lime_instance_0.png')
+                    def predict_fn(x):
+                        return self.models[model_choice].predict_proba(x)
+                
+                # Generate explanation for the current input
+                exp = explainer.explain_instance(
+                    input_df.values[0], 
+                    predict_fn,
+                    num_features=10
+                )
+                
+                # Show the visualization
+                fig = exp.as_pyplot_figure()
+                plt.title(f'LIME Explanation for Current Transaction - {model_choice}')
+                st.pyplot(fig)
+                plt.close()
+                    
             except Exception as e:
-                st.warning(f"LIME explanation not available: {str(e)}")
+                st.warning(f"LIME explanation failed: {str(e)}")
                 
         with tab3:
             try:
