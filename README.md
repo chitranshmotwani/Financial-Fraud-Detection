@@ -105,13 +105,13 @@ chmod 600 ~/.kaggle/kaggle.json
 
 ### 1. Complete pipeline (data → models)
 ```
-python src/models/train.py --all
+python src/models/main.py --all
 ```
 
 
 ### 2. Launch Streamlit app
 ```
-streamlit run src/app/main.py
+streamlit run src/app/streamlit_app.py
 ```
 ---
 
