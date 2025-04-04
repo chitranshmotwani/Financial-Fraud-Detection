@@ -1,4 +1,5 @@
-# 🚀 Financial Fraud Detection Using Machine Learning
+# 🚀 Financial Fraud Detection: A Comprehensive Machine Learning
+Approach with Explainable AI
 
 Financial fraud is a growing concern, affecting businesses and consumers worldwide. This project explores machine learning techniques to develop a robust fraud detection model capable of identifying fraudulent transactions with high accuracy.
 
