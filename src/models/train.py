@@ -40,19 +40,7 @@ class FraudDetectionModel:
         param_grid: Dict[str, Any] = None,
         cv: int = 5
     ) -> Any:
-        """
-        Train a specified model with optional hyperparameter tuning
-        
-        Args:
-            model_name (str): Name of the model to train
-            X_train (pd.DataFrame): Training features
-            y_train (pd.Series): Training labels
-            param_grid (dict): Hyperparameter grid for tuning
-            cv (int): Number of cross-validation folds
-            
-        Returns:
-            Trained model
-        """
+    
         if model_name not in self.models:
             raise ValueError(f"Unknown model: {model_name}. Available models: {list(self.models.keys())}")
             
@@ -101,19 +89,7 @@ class FraudDetectionModel:
         model_name: str = None,
         compute_shap: bool = True
     ) -> Dict[str, float]:
-        """
-        Evaluate model performance on test set
-        
-        Args:
-            model: Trained model
-            X_test (pd.DataFrame): Test features
-            y_test (pd.Series): Test labels
-            model_name (str): Name of the model
-            compute_shap (bool): Whether to compute SHAP values
-                
-        Returns:
-            dict: Dictionary of evaluation metrics
-        """
+
         if model_name is None:
             model_name = self.best_model_name
             

@@ -16,7 +16,7 @@ import shap
 import lime
 import lime.lime_tabular
 
-# Initialize SHAP JS - this is crucial for visualizations
+# Initialize SHAP JS
 shap.initjs()
 
 # Set page config
@@ -394,7 +394,6 @@ class FraudDetectionApp:
                         shap_values,
                         input_df,
                         feature_names=self.feature_names,
-                        plot_type="bar",
                         show=False
                     )
                     st.pyplot(plt.gcf(), bbox_inches='tight')
